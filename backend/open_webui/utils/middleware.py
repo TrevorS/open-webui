@@ -99,7 +99,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.payload import apply_system_prompt_to_body
-from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.mcp.client import MCPClient, EnhancedMCPClient
 
 
 from open_webui.config import (
@@ -1282,17 +1282,72 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     tool_specs = await mcp_clients[server_id].list_tool_specs()
                     for tool_spec in tool_specs:
 
-                        def make_tool_function(client, function_name):
+                        def make_tool_function(client, function_name, server_id):
                             async def tool_function(**kwargs):
-                                return await client.call_tool(
-                                    function_name,
-                                    function_args=kwargs,
+                                # Import here to avoid circular imports
+                                from open_webui.utils.mcp.client_v2 import EnhancedMCPClient
+                                from open_webui.utils.mcp.integration import (
+                                    process_mcp_result,
+                                    create_progress_callback,
                                 )
+
+                                # Check if client supports enhanced features
+                                if isinstance(client, EnhancedMCPClient):
+                                    try:
+                                        # Create progress callback if event emitter available
+                                        progress_callback = create_progress_callback(
+                                            event_emitter,
+                                            f"{server_id}_{function_name}"
+                                        )
+
+                                        # Call tool with enhanced features (returns MCPToolResult)
+                                        mcp_result = await client.call_tool(
+                                            function_name,
+                                            function_args=kwargs,
+                                            progress_callback=progress_callback
+                                        )
+
+                                        # Process result using Open WebUI utilities
+                                        result_text, result_files, result_embeds = await process_mcp_result(
+                                            request,
+                                            f"{server_id}_{function_name}",
+                                            mcp_result,
+                                            event_emitter,
+                                            metadata,
+                                            user
+                                        )
+
+                                        # Return in format expected by middleware
+                                        # If there are files, return them in the structure
+                                        if result_files or result_embeds:
+                                            return {
+                                                "text": result_text,
+                                                "files": result_files,
+                                                "embeds": result_embeds,
+                                                "structured": mcp_result.structured_content
+                                            }
+                                        else:
+                                            # For backward compatibility, if no files/embeds, just return text
+                                            return result_text
+
+                                    except Exception as e:
+                                        log.error(f"Error with enhanced MCP client: {e}")
+                                        # Fall back to basic call on error
+                                        return await client.call_tool(
+                                            function_name,
+                                            function_args=kwargs,
+                                        )
+                                else:
+                                    # Fallback to original behavior for non-enhanced clients
+                                    return await client.call_tool(
+                                        function_name,
+                                        function_args=kwargs,
+                                    )
 
                             return tool_function
 
                         tool_function = make_tool_function(
-                            mcp_clients[server_id], tool_spec["name"]
+                            mcp_clients[server_id], tool_spec["name"], server_id
                         )
 
                         mcp_tools_dict[f"{server_id}_{tool_spec['name']}"] = {
