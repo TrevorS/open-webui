@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { ChevronDown, Copy } from 'lucide-svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
 	export let data: Record<string, any> = {};
 	export let toolName: string = 'Tool';
@@ -32,18 +32,16 @@
 			on:click={() => (expanded = !expanded)}
 			class="flex items-center gap-2 font-medium text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
 		>
-			<ChevronDown
-				size={18}
-				class="transform transition-transform {expanded ? 'rotate-180' : ''}"
-			/>
+			<div class="w-5 h-5 transform transition-transform {expanded ? 'rotate-180' : ''}">
+				<ChevronDown />
+			</div>
 			<span>{toolName} Data</span>
 		</button>
 		<button
 			on:click={copyToClipboard}
-			class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+			class="px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
 			title="Copy JSON"
 		>
-			<Copy size={14} />
 			Copy
 		</button>
 	</div>
