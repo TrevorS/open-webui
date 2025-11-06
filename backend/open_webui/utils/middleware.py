@@ -277,14 +277,25 @@ def process_tool_result(
         tool_result = {"results": tool_result}
 
     # Handle enhanced MCP result dict format (has text, files, embeds, structured)
-    # Don't stringify if it's an MCP result - it's already in the right format
-    enhanced_structured_content = None
+    # Extract fields so LLM gets clean text, frontend gets files/embeds
     if isinstance(tool_result, dict):
         if "text" in tool_result and ("files" in tool_result or "embeds" in tool_result or "structured" in tool_result):
-            # This is an enhanced MCP result dict
-            enhanced_structured_content = tool_result.get("structured")
-            # Return the dict as-is, not stringified
-            return tool_result, tool_result_files, tool_result_embeds
+            # This is an enhanced MCP result dict - extract the fields
+            text_result = tool_result.get("text", "")
+
+            # Merge files from enhanced result into tool_result_files
+            if "files" in tool_result and tool_result["files"]:
+                tool_result_files.extend(tool_result["files"])
+
+            # Merge embeds from enhanced result into tool_result_embeds
+            if "embeds" in tool_result and tool_result["embeds"]:
+                tool_result_embeds.extend(tool_result["embeds"])
+
+            # Structured data is preserved for potential future use
+            # (Currently not used by frontend, but available if needed)
+
+            # Return just the TEXT for the LLM to see
+            return text_result, tool_result_files, tool_result_embeds
         else:
             # Regular dict - stringify it
             tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
