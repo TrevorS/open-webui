@@ -53,6 +53,7 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
+	import StructuredDataViewer from './ResponseMessage/StructuredDataViewer.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	interface MessageType {
@@ -104,6 +105,14 @@
 			usage?: unknown;
 		};
 		annotation?: { type: string; rating: number };
+		data?: {
+			structured?: Record<string, any>;
+			tool_result?: {
+				tool_name: string;
+				executed_at: number;
+				status: string;
+			};
+		};
 	}
 
 	export let chatId = '';
@@ -689,6 +698,13 @@
 									</div>
 								{/each}
 							</div>
+						{/if}
+
+						{#if message?.data?.structured}
+							<StructuredDataViewer
+								data={message.data.structured}
+								toolName={message.data.tool_result?.tool_name || 'Tool'}
+							/>
 						{/if}
 
 						{#if edit === true}
