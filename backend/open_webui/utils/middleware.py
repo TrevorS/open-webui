@@ -508,22 +508,48 @@ async def chat_completion_tools_handler(
 
                     # Citation is not enabled for this tool
                     # Prepare tool result data (structured content + metadata)
-                    tool_message_data = None
-                    if tool_result_structured:
-                        tool_message_data = {
-                            "structured": tool_result_structured,
-                            "tool_result": {
-                                "tool_name": tool_name,
-                                "executed_at": int(time.time()),
-                                "status": "success"
-                            }
+                    # Always include tool execution metadata
+                    tool_message_data = {
+                        "tool_result": {
+                            "tool_name": tool_name,
+                            "executed_at": int(time.time()),
+                            "status": "success"
                         }
+                    }
+                    # Add structured content if available
+                    if tool_result_structured:
+                        tool_message_data["structured"] = tool_result_structured
 
                     body["messages"] = add_or_update_user_message(
                         f"\nTool `{tool_name}` Output: {tool_result}",
                         body["messages"],
                         data=tool_message_data,
                     )
+
+                    # Persist the updated user message to database
+                    chat_id = body.get("metadata", {}).get("chat_id")
+                    if chat_id and not chat_id.startswith("local:"):
+                        try:
+                            # Find the last user message that we just updated
+                            last_user_msg = None
+                            for msg in reversed(body["messages"]):
+                                if msg.get("role") == "user":
+                                    last_user_msg = msg
+                                    break
+
+                            if last_user_msg:
+                                # Ensure message has an ID
+                                if "id" not in last_user_msg:
+                                    last_user_msg["id"] = str(uuid4())
+
+                                # Persist to database with the data field
+                                Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    chat_id,
+                                    last_user_msg["id"],
+                                    last_user_msg
+                                )
+                        except Exception as e:
+                            log.warning(f"Failed to persist tool result message: {e}")
 
                     if (
                         tools[tool_function_name]
