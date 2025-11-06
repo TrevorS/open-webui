@@ -178,6 +178,9 @@ def add_or_update_user_message(content: str, messages: list[dict], append: bool 
 
     if messages and messages[-1].get("role") == "user":
         messages[-1] = update_message_content(messages[-1], content, append)
+        # Also add or update the data field when updating existing message
+        if data:
+            messages[-1]["data"] = data
     else:
         # Insert at the end
         message = {"role": "user", "content": content}
