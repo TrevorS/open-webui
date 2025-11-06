@@ -124,6 +124,11 @@
 	$: if (history.messages) {
 		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
 			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+			// Log message structure for debugging
+			const hasData = 'data' in message;
+			const hasStructured = hasData && 'structured' in message.data;
+			const structuredKeys = hasStructured ? Object.keys(message.data.structured) : [];
+			console.log(`🎨 FRONTEND MSG: id=${message.id}, role=${message.role}, has_data=${hasData}, has_structured=${hasStructured}, structured_keys=[${structuredKeys.join(', ')}]`);
 		}
 	}
 
@@ -701,6 +706,11 @@
 						{/if}
 
 						{#if message?.data?.structured}
+							{(() => {
+								const structuredKeys = Object.keys(message.data.structured);
+								console.log(`✅ RENDERING StructuredDataViewer with data: [${structuredKeys.join(', ')}]`);
+								return null;
+							})()}
 							<StructuredDataViewer
 								data={message.data.structured}
 								toolName={message.data.tool_result?.tool_name || 'Tool'}

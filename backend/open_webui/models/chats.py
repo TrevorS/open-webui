@@ -255,6 +255,9 @@ class ChatTable:
     def upsert_message_to_chat_by_id_and_message_id(
         self, id: str, message_id: str, message: dict
     ) -> Optional[ChatModel]:
+        import logging
+        log = logging.getLogger(__name__)
+
         chat = self.get_chat_by_id(id)
         if chat is None:
             return None
@@ -262,6 +265,10 @@ class ChatTable:
         # Sanitize message content for null characters before upserting
         if isinstance(message.get("content"), str):
             message["content"] = message["content"].replace("\x00", "")
+
+        log.info(f"📥 UPSERTING MESSAGE: msg_id={message_id}, msg_keys={list(message.keys())}, has_data={('data' in message)}")
+        if 'data' in message:
+            log.info(f"   └─ data_keys={list(message['data'].keys())}, has_structured={('structured' in message['data'])}")
 
         chat = chat.chat
         history = chat.get("history", {})
@@ -273,6 +280,8 @@ class ChatTable:
             }
         else:
             history["messages"][message_id] = message
+
+        log.info(f"📥 AFTER MERGE: msg_keys={list(history['messages'][message_id].keys())}, has_data={('data' in history['messages'][message_id])}")
 
         history["currentId"] = message_id
 

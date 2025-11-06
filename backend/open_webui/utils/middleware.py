@@ -520,11 +520,19 @@ async def chat_completion_tools_handler(
                     if tool_result_structured:
                         tool_message_data["structured"] = tool_result_structured
 
+                    # Log the tool data being created
+                    log.info(f"🔧 MCP TOOL DATA CREATED: tool={tool_name}, has_structured={bool(tool_result_structured)}, data_keys={list(tool_message_data.keys())}")
+
                     body["messages"] = add_or_update_user_message(
                         f"\nTool `{tool_name}` Output: {tool_result}",
                         body["messages"],
                         data=tool_message_data,
                     )
+
+                    # Log the message after update
+                    last_msg = body["messages"][-1] if body["messages"] else None
+                    if last_msg:
+                        log.info(f"📝 USER MESSAGE AFTER UPDATE: role={last_msg.get('role')}, has_data={('data' in last_msg)}, data_keys={list(last_msg.get('data', {}).keys()) if 'data' in last_msg else []}")
 
                     # Persist the updated user message to database
                     chat_id = body.get("metadata", {}).get("chat_id")
@@ -542,14 +550,17 @@ async def chat_completion_tools_handler(
                                 if "id" not in last_user_msg:
                                     last_user_msg["id"] = str(uuid4())
 
+                                log.info(f"💾 PERSISTING TO DB: msg_id={last_user_msg['id']}, has_data={('data' in last_user_msg)}, has_structured={('structured' in last_user_msg.get('data', {}))}")
+
                                 # Persist to database with the data field
                                 Chats.upsert_message_to_chat_by_id_and_message_id(
                                     chat_id,
                                     last_user_msg["id"],
                                     last_user_msg
                                 )
+                                log.info(f"✅ PERSISTED TO DB: msg_id={last_user_msg['id']} completed")
                         except Exception as e:
-                            log.warning(f"Failed to persist tool result message: {e}")
+                            log.warning(f"❌ Failed to persist tool result message: {e}")
 
                     if (
                         tools[tool_function_name]

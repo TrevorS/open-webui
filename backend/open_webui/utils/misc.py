@@ -177,15 +177,20 @@ def add_or_update_user_message(content: str, messages: list[dict], append: bool 
     """
 
     if messages and messages[-1].get("role") == "user":
+        log.info(f"🔄 UPDATING EXISTING USER MSG: adding_data={data is not None}, data_keys={list(data.keys()) if data else []}")
         messages[-1] = update_message_content(messages[-1], content, append)
         # Also add or update the data field when updating existing message
         if data:
             messages[-1]["data"] = data
+            log.info(f"✨ DATA FIELD ADDED TO EXISTING MSG: msg_has_data={('data' in messages[-1])}, data_keys={list(messages[-1]['data'].keys())}")
     else:
         # Insert at the end
         message = {"role": "user", "content": content}
         if data:
             message["data"] = data
+            log.info(f"✨ CREATING NEW USER MSG WITH DATA: data_keys={list(data.keys())}")
+        else:
+            log.info(f"✨ CREATING NEW USER MSG WITHOUT DATA")
         messages.append(message)
 
     return messages
