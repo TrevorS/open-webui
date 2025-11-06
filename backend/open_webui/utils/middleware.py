@@ -277,11 +277,32 @@ def process_tool_result(
         tool_result = {"results": tool_result}
 
     # Handle enhanced MCP result dict format (has text, files, embeds, structured)
+    # Also handle standard MCP format with text + structuredContent
     # Extract fields so LLM gets clean text, frontend gets files/embeds/structured
     tool_result_structured = None
     if isinstance(tool_result, dict):
-        if "text" in tool_result and ("files" in tool_result or "embeds" in tool_result or "structured" in tool_result):
-            # This is an enhanced MCP result dict - extract the fields
+        # Debug log to see structure
+        log.info(f"🔍 PROCESS_TOOL_RESULT: tool={tool_function_name}, keys={list(tool_result.keys())}, structured_in_result={'structuredContent' in tool_result}")
+
+        # Check for enhanced format OR standard MCP format with structuredContent
+        has_enhanced_fields = "files" in tool_result or "embeds" in tool_result or "structured" in tool_result
+        has_structured_content = "structuredContent" in tool_result
+
+        # Handle MCP CallToolResult format where text is in content array
+        if "content" in tool_result and isinstance(tool_result.get("content"), list) and has_structured_content:
+            # This is MCP CallToolResult format: {content: [TextContent, ...], structuredContent: {...}}
+            content_blocks = tool_result.get("content", [])
+            text_parts = []
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            text_result = "\n".join(text_parts) if text_parts else ""
+            tool_result_structured = tool_result.get("structuredContent")
+            log.info(f"🎯 MCP CallToolResult: extracted_text_len={len(text_result)}, has_structured={bool(tool_result_structured)}")
+            return text_result, tool_result_files, tool_result_embeds, tool_result_structured
+
+        elif "text" in tool_result and (has_enhanced_fields or has_structured_content):
+            # This is an enhanced MCP result dict OR standard MCP with structuredContent
             text_result = tool_result.get("text", "")
 
             # Merge files from enhanced result into tool_result_files
@@ -293,8 +314,13 @@ def process_tool_result(
                 tool_result_embeds.extend(tool_result["embeds"])
 
             # Extract structured data for frontend rendering
+            # Support both our custom "structured" key and standard MCP "structuredContent"
             if "structured" in tool_result and tool_result["structured"]:
                 tool_result_structured = tool_result["structured"]
+                log.info(f"🎯 Extracted 'structured' field from tool result: {tool_function_name}")
+            elif "structuredContent" in tool_result and tool_result["structuredContent"]:
+                tool_result_structured = tool_result["structuredContent"]
+                log.info(f"🎯 Extracted 'structuredContent' field (MCP standard) from tool result: {tool_function_name}")
 
             # Return text for LLM + structured for frontend
             return text_result, tool_result_files, tool_result_embeds, tool_result_structured
@@ -2136,6 +2162,32 @@ async def process_chat_response(
 
                 return content.strip()
 
+            def extract_structured_from_blocks(content_blocks):
+                """Extract structured data from tool results in content blocks."""
+                message_data = {
+                    "tool_results": {
+                        "executed_at": int(time.time()),
+                        "status": "success"
+                    }
+                }
+
+                structured_results = {}
+                for block in content_blocks:
+                    if block.get("type") == "tool_calls" and "results" in block:
+                        # Get the tool name from the tool_calls
+                        tool_calls = block.get("content", [])
+                        for idx, result in enumerate(block["results"]):
+                            if "structured" in result and result["structured"]:
+                                tool_name = tool_calls[idx].get("function", {}).get("name", f"tool_{idx}") if idx < len(tool_calls) else f"tool_{idx}"
+                                structured_results[tool_name] = result["structured"]
+                                log.info(f"🎯 EXTRACTED STRUCTURED DATA: tool={tool_name}, keys={list(result['structured'].keys())}")
+
+                if structured_results:
+                    message_data["structured"] = structured_results
+                    log.info(f"🎯 MESSAGE DATA: status={message_data['tool_results']['status']}, tools={list(structured_results.keys())}")
+
+                return message_data if structured_results else None
+
             def convert_content_blocks_to_messages(content_blocks, raw=False):
                 messages = []
 
@@ -2690,14 +2742,18 @@ async def process_chat_response(
 
                                         if ENABLE_REALTIME_CHAT_SAVE:
                                             # Save message in the database
+                                            message_data = extract_structured_from_blocks(content_blocks)
+                                            upsert_data = {
+                                                "content": serialize_content_blocks(
+                                                    content_blocks
+                                                ),
+                                            }
+                                            if message_data:
+                                                upsert_data["data"] = message_data
                                             Chats.upsert_message_to_chat_by_id_and_message_id(
                                                 metadata["chat_id"],
                                                 metadata["message_id"],
-                                                {
-                                                    "content": serialize_content_blocks(
-                                                        content_blocks
-                                                    ),
-                                                },
+                                                upsert_data,
                                             )
                                         else:
                                             data = {
@@ -2902,6 +2958,11 @@ async def process_chat_response(
                                     if tool_result_embeds
                                     else {}
                                 ),
+                                **(
+                                    {"structured": tool_result_structured}
+                                    if tool_result_structured
+                                    else {}
+                                ),
                             }
                         )
 
@@ -2913,12 +2974,21 @@ async def process_chat_response(
                         }
                     )
 
+                    # Extract structured data from tool results for frontend rendering
+                    structured_data = extract_structured_from_blocks(content_blocks)
+
+                    # Build event data with content and optional structured data
+                    event_data = {
+                        "content": serialize_content_blocks(content_blocks),
+                    }
+                    if structured_data:
+                        event_data["structured"] = structured_data
+                        log.info(f"🎯 EMITTING structured data to frontend: {list(structured_data.get('structured', {}).keys())}")
+
                     await event_emitter(
                         {
                             "type": "chat:completion",
-                            "data": {
-                                "content": serialize_content_blocks(content_blocks),
-                            },
+                            "data": event_data,
                         }
                     )
 
@@ -3137,12 +3207,16 @@ async def process_chat_response(
 
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     # Save message in the database
+                    message_data = extract_structured_from_blocks(content_blocks)
+                    upsert_data = {
+                        "content": serialize_content_blocks(content_blocks),
+                    }
+                    if message_data:
+                        upsert_data["data"] = message_data
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"],
                         metadata["message_id"],
-                        {
-                            "content": serialize_content_blocks(content_blocks),
-                        },
+                        upsert_data,
                     )
 
                 # Send a webhook notification if the user is not active

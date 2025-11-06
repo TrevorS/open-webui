@@ -1327,10 +1327,19 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, sources, selected_model_id, error, usage } = data;
+		const { id, done, choices, content, sources, selected_model_id, error, usage, structured } = data;
 
 		if (error) {
 			await handleOpenAIError(error, message);
+		}
+
+		// Handle structured data from MCP tools (e.g., weather tool results)
+		if (structured) {
+			if (!message.data) {
+				message.data = {};
+			}
+			message.data.structured = structured;
+			console.log(`✅ ASSIGNED structured data to message.data: ${Object.keys(structured).join(', ')}`);
 		}
 
 		if (sources && !message?.sources) {
