@@ -118,15 +118,8 @@ async def process_mcp_result(
     # Combine text parts
     tool_result_text = "\n".join(tool_result_text_parts)
 
-    # Add structured content if available
-    if mcp_result.structured_content:
-        try:
-            structured_json = json.dumps(
-                mcp_result.structured_content, indent=2, ensure_ascii=False
-            )
-            tool_result_text += f"\n\n[Structured Data]\n{structured_json}"
-        except Exception as e:
-            log.error(f"Failed to serialize structured content: {e}")
+    # Note: Structured content is returned separately in the dict format from the tool function
+    # It's NOT appended to text - it's passed via the "structured" field
 
     return tool_result_text, tool_result_files, tool_result_embeds
 

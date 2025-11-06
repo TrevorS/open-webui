@@ -276,7 +276,19 @@ def process_tool_result(
     if isinstance(tool_result, list):
         tool_result = {"results": tool_result}
 
-    if isinstance(tool_result, dict) or isinstance(tool_result, list):
+    # Handle enhanced MCP result dict format (has text, files, embeds, structured)
+    # Don't stringify if it's an MCP result - it's already in the right format
+    enhanced_structured_content = None
+    if isinstance(tool_result, dict):
+        if "text" in tool_result and ("files" in tool_result or "embeds" in tool_result or "structured" in tool_result):
+            # This is an enhanced MCP result dict
+            enhanced_structured_content = tool_result.get("structured")
+            # Return the dict as-is, not stringified
+            return tool_result, tool_result_files, tool_result_embeds
+        else:
+            # Regular dict - stringify it
+            tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
+    elif isinstance(tool_result, list):
         tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
 
     return tool_result, tool_result_files, tool_result_embeds
@@ -1317,18 +1329,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                                             user
                                         )
 
-                                        # Return in format expected by middleware
-                                        # If there are files, return them in the structure
-                                        if result_files or result_embeds:
-                                            return {
-                                                "text": result_text,
-                                                "files": result_files,
-                                                "embeds": result_embeds,
-                                                "structured": mcp_result.structured_content
-                                            }
-                                        else:
-                                            # For backward compatibility, if no files/embeds, just return text
-                                            return result_text
+                                        # Return in enhanced format with all content types
+                                        # Always include structured content if available
+                                        result = {
+                                            "text": result_text,
+                                            "files": result_files,
+                                            "embeds": result_embeds,
+                                        }
+                                        if mcp_result.structured_content:
+                                            result["structured"] = mcp_result.structured_content
+                                        return result
 
                                     except Exception as e:
                                         log.error(f"Error with enhanced MCP client: {e}")
