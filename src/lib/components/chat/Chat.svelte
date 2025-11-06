@@ -1339,7 +1339,6 @@
 				message.data = {};
 			}
 			message.data.structured = structured;
-			console.log(`✅ ASSIGNED structured data to message.data: ${Object.keys(structured).join(', ')}`);
 		}
 
 		if (sources && !message?.sources) {

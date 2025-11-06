@@ -276,19 +276,17 @@ def process_tool_result(
     if isinstance(tool_result, list):
         tool_result = {"results": tool_result}
 
-    # Handle enhanced MCP result dict format (has text, files, embeds, structured)
-    # Also handle standard MCP format with text + structuredContent
-    # Extract fields so LLM gets clean text, frontend gets files/embeds/structured
+    # Extract structured content and normalize tool results for MCP compliance.
+    # MCP tools return CallToolResult{content: [TextContent, ...], structuredContent: {...}}
     tool_result_structured = None
     if isinstance(tool_result, dict):
-        # Debug log to see structure
-        log.info(f"🔍 PROCESS_TOOL_RESULT: tool={tool_function_name}, keys={list(tool_result.keys())}, structured_in_result={'structuredContent' in tool_result}")
-
-        # Check for enhanced format OR standard MCP format with structuredContent
-        has_enhanced_fields = "files" in tool_result or "embeds" in tool_result or "structured" in tool_result
+        # Check for MCP CallToolResult format with structured content
         has_structured_content = "structuredContent" in tool_result
 
-        # Handle MCP CallToolResult format where text is in content array
+        # Handle MCP CallToolResult format where text is in content array.
+        # CRITICAL FIX: This handles the native MCP format where text is nested in content[].
+        # Without this, the entire dict gets stringified, causing "null" text display in UI.
+        # See: commit 364d4b4fb for the bug details and fix.
         if "content" in tool_result and isinstance(tool_result.get("content"), list) and has_structured_content:
             # This is MCP CallToolResult format: {content: [TextContent, ...], structuredContent: {...}}
             content_blocks = tool_result.get("content", [])
@@ -298,31 +296,6 @@ def process_tool_result(
                     text_parts.append(block.get("text", ""))
             text_result = "\n".join(text_parts) if text_parts else ""
             tool_result_structured = tool_result.get("structuredContent")
-            log.info(f"🎯 MCP CallToolResult: extracted_text_len={len(text_result)}, has_structured={bool(tool_result_structured)}")
-            return text_result, tool_result_files, tool_result_embeds, tool_result_structured
-
-        elif "text" in tool_result and (has_enhanced_fields or has_structured_content):
-            # This is an enhanced MCP result dict OR standard MCP with structuredContent
-            text_result = tool_result.get("text", "")
-
-            # Merge files from enhanced result into tool_result_files
-            if "files" in tool_result and tool_result["files"]:
-                tool_result_files.extend(tool_result["files"])
-
-            # Merge embeds from enhanced result into tool_result_embeds
-            if "embeds" in tool_result and tool_result["embeds"]:
-                tool_result_embeds.extend(tool_result["embeds"])
-
-            # Extract structured data for frontend rendering
-            # Support both our custom "structured" key and standard MCP "structuredContent"
-            if "structured" in tool_result and tool_result["structured"]:
-                tool_result_structured = tool_result["structured"]
-                log.info(f"🎯 Extracted 'structured' field from tool result: {tool_function_name}")
-            elif "structuredContent" in tool_result and tool_result["structuredContent"]:
-                tool_result_structured = tool_result["structuredContent"]
-                log.info(f"🎯 Extracted 'structuredContent' field (MCP standard) from tool result: {tool_function_name}")
-
-            # Return text for LLM + structured for frontend
             return text_result, tool_result_files, tool_result_embeds, tool_result_structured
         else:
             # Regular dict - stringify it
@@ -576,15 +549,12 @@ async def chat_completion_tools_handler(
                                 if "id" not in last_user_msg:
                                     last_user_msg["id"] = str(uuid4())
 
-                                log.info(f"💾 PERSISTING TO DB: msg_id={last_user_msg['id']}, has_data={('data' in last_user_msg)}, has_structured={('structured' in last_user_msg.get('data', {}))}")
-
                                 # Persist to database with the data field
                                 Chats.upsert_message_to_chat_by_id_and_message_id(
                                     chat_id,
                                     last_user_msg["id"],
                                     last_user_msg
                                 )
-                                log.info(f"✅ PERSISTED TO DB: msg_id={last_user_msg['id']} completed")
                         except Exception as e:
                             log.warning(f"❌ Failed to persist tool result message: {e}")
 
@@ -2163,7 +2133,13 @@ async def process_chat_response(
                 return content.strip()
 
             def extract_structured_from_blocks(content_blocks):
-                """Extract structured data from tool results in content blocks."""
+                """Extract structured data from tool results for frontend rendering.
+
+                This enables rich UI components (weather cards, charts, etc.) to display
+                structured data returned by MCP tools, while keeping text descriptions
+                clean for the LLM. Structured data is emitted via SSE stream to frontend
+                Chat.svelte which renders it with StructuredDataViewer component.
+                """
                 message_data = {
                     "tool_results": {
                         "executed_at": int(time.time()),
@@ -2180,11 +2156,9 @@ async def process_chat_response(
                             if "structured" in result and result["structured"]:
                                 tool_name = tool_calls[idx].get("function", {}).get("name", f"tool_{idx}") if idx < len(tool_calls) else f"tool_{idx}"
                                 structured_results[tool_name] = result["structured"]
-                                log.info(f"🎯 EXTRACTED STRUCTURED DATA: tool={tool_name}, keys={list(result['structured'].keys())}")
 
                 if structured_results:
                     message_data["structured"] = structured_results
-                    log.info(f"🎯 MESSAGE DATA: status={message_data['tool_results']['status']}, tools={list(structured_results.keys())}")
 
                 return message_data if structured_results else None
 
@@ -2977,13 +2951,14 @@ async def process_chat_response(
                     # Extract structured data from tool results for frontend rendering
                     structured_data = extract_structured_from_blocks(content_blocks)
 
-                    # Build event data with content and optional structured data
+                    # Build event data with content and optional structured data.
+                    # Frontend Chat.svelte expects event_data.structured to populate message.data.structured
+                    # for rendering with StructuredDataViewer component via SSE stream.
                     event_data = {
                         "content": serialize_content_blocks(content_blocks),
                     }
                     if structured_data:
                         event_data["structured"] = structured_data
-                        log.info(f"🎯 EMITTING structured data to frontend: {list(structured_data.get('structured', {}).keys())}")
 
                     await event_emitter(
                         {
