@@ -165,13 +165,14 @@ def add_or_update_system_message(
     return messages
 
 
-def add_or_update_user_message(content: str, messages: list[dict], append: bool = True):
+def add_or_update_user_message(content: str, messages: list[dict], append: bool = True, data: dict = None):
     """
     Adds a new user message at the end of the messages list
     or updates the existing user message at the end.
 
     :param msg: The message to be added or appended.
     :param messages: The list of message dictionaries.
+    :param data: Optional dict with structured content and metadata to attach to message.
     :return: The updated list of message dictionaries.
     """
 
@@ -179,7 +180,10 @@ def add_or_update_user_message(content: str, messages: list[dict], append: bool 
         messages[-1] = update_message_content(messages[-1], content, append)
     else:
         # Insert at the end
-        messages.append({"role": "user", "content": content})
+        message = {"role": "user", "content": content}
+        if data:
+            message["data"] = data
+        messages.append(message)
 
     return messages
 

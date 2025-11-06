@@ -277,7 +277,8 @@ def process_tool_result(
         tool_result = {"results": tool_result}
 
     # Handle enhanced MCP result dict format (has text, files, embeds, structured)
-    # Extract fields so LLM gets clean text, frontend gets files/embeds
+    # Extract fields so LLM gets clean text, frontend gets files/embeds/structured
+    tool_result_structured = None
     if isinstance(tool_result, dict):
         if "text" in tool_result and ("files" in tool_result or "embeds" in tool_result or "structured" in tool_result):
             # This is an enhanced MCP result dict - extract the fields
@@ -291,18 +292,19 @@ def process_tool_result(
             if "embeds" in tool_result and tool_result["embeds"]:
                 tool_result_embeds.extend(tool_result["embeds"])
 
-            # Structured data is preserved for potential future use
-            # (Currently not used by frontend, but available if needed)
+            # Extract structured data for frontend rendering
+            if "structured" in tool_result and tool_result["structured"]:
+                tool_result_structured = tool_result["structured"]
 
-            # Return just the TEXT for the LLM to see
-            return text_result, tool_result_files, tool_result_embeds
+            # Return text for LLM + structured for frontend
+            return text_result, tool_result_files, tool_result_embeds, tool_result_structured
         else:
             # Regular dict - stringify it
             tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
     elif isinstance(tool_result, list):
         tool_result = json.dumps(tool_result, indent=2, ensure_ascii=False)
 
-    return tool_result, tool_result_files, tool_result_embeds
+    return tool_result, tool_result_files, tool_result_embeds, tool_result_structured
 
 
 async def chat_completion_tools_handler(
@@ -438,7 +440,7 @@ async def chat_completion_tools_handler(
                 except Exception as e:
                     tool_result = str(e)
 
-                tool_result, tool_result_files, tool_result_embeds = (
+                tool_result, tool_result_files, tool_result_embeds, tool_result_structured = (
                     process_tool_result(
                         request,
                         tool_function_name,
@@ -505,9 +507,22 @@ async def chat_completion_tools_handler(
                     )
 
                     # Citation is not enabled for this tool
+                    # Prepare tool result data (structured content + metadata)
+                    tool_message_data = None
+                    if tool_result_structured:
+                        tool_message_data = {
+                            "structured": tool_result_structured,
+                            "tool_result": {
+                                "tool_name": tool_name,
+                                "executed_at": int(time.time()),
+                                "status": "success"
+                            }
+                        }
+
                     body["messages"] = add_or_update_user_message(
                         f"\nTool `{tool_name}` Output: {tool_result}",
                         body["messages"],
+                        data=tool_message_data,
                     )
 
                     if (
@@ -2824,7 +2839,7 @@ async def process_chat_response(
                             except Exception as e:
                                 tool_result = str(e)
 
-                        tool_result, tool_result_files, tool_result_embeds = (
+                        tool_result, tool_result_files, tool_result_embeds, tool_result_structured = (
                             process_tool_result(
                                 request,
                                 tool_function_name,
