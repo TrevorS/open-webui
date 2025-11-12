@@ -261,6 +261,69 @@ def process_tool_result(
                                 "url": file_url,
                             }
                         )
+                    elif item.get("type") == "resource":
+                        # Handle EmbeddedResource
+                        resource = item.get("resource", {})
+                        mime_type = resource.get("mimeType", "application/octet-stream")
+                        uri = resource.get("uri", "")
+
+                        # Determine if it's text or binary content
+                        if "text" in resource:
+                            # Text resource
+                            text_content = resource.get("text", "")
+                            if mime_type.startswith("text/plain") or mime_type.startswith("text/markdown"):
+                                # Treat as text response
+                                tool_response.append({
+                                    "type": "text_resource",
+                                    "uri": uri,
+                                    "content": text_content,
+                                    "mimeType": mime_type
+                                })
+                            elif mime_type == "text/html":
+                                # Embed as HTML
+                                tool_result_embeds.append(text_content)
+                                tool_response.append(f"Embedded HTML resource from {uri}")
+                            else:
+                                # Other text types
+                                tool_response.append(text_content)
+                        elif "blob" in resource:
+                            # Binary resource (image, audio, pdf, etc.)
+                            blob_data = resource.get("blob", "")
+                            file_url = get_file_url_from_base64(
+                                request,
+                                f"data:{mime_type};base64,{blob_data}",
+                                {
+                                    "chat_id": metadata.get("chat_id", None),
+                                    "message_id": metadata.get("message_id", None),
+                                    "session_id": metadata.get("session_id", None),
+                                    "resource": {
+                                        "uri": uri,
+                                        "mimeType": mime_type,
+                                    },
+                                },
+                                user,
+                            )
+
+                            # Determine file type category
+                            file_type = "file"
+                            if mime_type.startswith("image/"):
+                                file_type = "image"
+                            elif mime_type.startswith("audio/"):
+                                file_type = "audio"
+                            elif mime_type.startswith("video/"):
+                                file_type = "video"
+                            elif mime_type == "application/pdf":
+                                file_type = "pdf"
+
+                            tool_result_files.append({
+                                "type": file_type,
+                                "url": file_url,
+                                "name": uri.split("/")[-1] if "/" in uri else uri,
+                                "mimeType": mime_type,
+                            })
+                        else:
+                            # Resource with no content, just metadata
+                            tool_response.append(f"Resource reference: {uri}")
             tool_result = tool_response[0] if len(tool_response) == 1 else tool_response
         else:  # OpenAPI
             for item in tool_result:
@@ -1359,7 +1422,25 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                             log.error(f"Error getting OAuth token: {e}")
                             oauth_token = None
 
-                    mcp_clients[server_id] = MCPClient()
+                    # Create progress handler for MCP tool execution
+                    async def mcp_progress_handler(notification):
+                        """Handle progress notifications from MCP server"""
+                        if event_emitter:
+                            try:
+                                await event_emitter({
+                                    "type": "status",
+                                    "data": {
+                                        "action": "tool_progress",
+                                        "description": notification.message or "Processing...",
+                                        "done": False,
+                                        "progress": notification.progress,
+                                        "total": notification.total,
+                                    }
+                                })
+                            except Exception as e:
+                                log.error(f"Error emitting MCP progress: {e}")
+
+                    mcp_clients[server_id] = MCPClient(progress_callback=mcp_progress_handler)
                     await mcp_clients[server_id].connect(
                         url=mcp_server_connection.get("url", ""),
                         headers=headers if headers else None,
