@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional
+from typing import Optional, Callable
 from contextlib import AsyncExitStack
 
 import anyio
@@ -11,9 +11,10 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAu
 
 
 class MCPClient:
-    def __init__(self):
+    def __init__(self, progress_callback: Optional[Callable] = None):
         self.session: Optional[ClientSession] = None
         self.exit_stack = None
+        self.progress_callback = progress_callback
 
     async def connect(self, url: str, headers: Optional[dict] = None):
         async with AsyncExitStack() as exit_stack:
@@ -23,8 +24,11 @@ class MCPClient:
                 transport = await exit_stack.enter_async_context(self._streams_context)
                 read_stream, write_stream, _ = transport
 
+                # Pass progress_callback to ClientSession if provided
                 self._session_context = ClientSession(
-                    read_stream, write_stream
+                    read_stream,
+                    write_stream,
+                    progress_callback=self.progress_callback
                 )  # pylint: disable=W0201
 
                 self.session = await exit_stack.enter_async_context(

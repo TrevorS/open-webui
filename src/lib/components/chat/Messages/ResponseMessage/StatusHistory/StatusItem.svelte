@@ -122,6 +122,20 @@
 					{/if}
 				</div>
 			</div>
+		{:else if status?.action === 'tool_progress' && status?.progress !== undefined && status?.total !== undefined}
+			<!-- Progress bar for MCP tool execution -->
+			<div class="flex flex-col justify-center w-full gap-1">
+				<div class="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+					<span class="line-clamp-1">{status?.description || 'Processing...'}</span>
+					<span class="ml-2 shrink-0">{Math.round((status.progress / status.total) * 100)}%</span>
+				</div>
+				<div class="w-full bg-gray-200 rounded-full h-1.5 dark:bg-gray-700">
+					<div
+						class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+						style="width: {Math.min((status.progress / status.total) * 100, 100)}%"
+					></div>
+				</div>
+			</div>
 		{:else}
 			<div class="flex flex-col justify-center -space-y-0.5">
 				<div
